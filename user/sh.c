@@ -72,13 +72,52 @@ runcmd(struct cmd *cmd)
   default:
     panic("runcmd");
 
-  case EXEC:
-    ecmd = (struct execcmd*)cmd;
-    if(ecmd->argv[0] == 0)
-      exit(1);
-    exec(ecmd->argv[0], ecmd->argv);
-    fprintf(2, "exec %s failed\n", ecmd->argv[0]);
-    break;
+case EXEC:
+  ecmd = (struct execcmd*)cmd;
+  if(ecmd->argv[0] == 0)
+    exit(1);
+
+  // Handle ! command
+  if(ecmd->argv[0] && strcmp(ecmd->argv[0], "!") == 0) {
+    // Calculate the full message length
+    int total_len = 0;
+    for(int i = 1; ecmd->argv[i]; i++) {
+      total_len += strlen(ecmd->argv[i]) + 1; // +1 for space
+    }
+
+    if(total_len > 512){
+      printf("Message too long\n");
+      exit(0);
+    }
+
+    const char *blue = "\033[34m";
+    const char *reset = "\033[0m";
+    
+    // Print message with "os" in blue
+    for(int i = 1; ecmd->argv[i]; i++){
+    char *p = ecmd->argv[i];
+    while (*p) {
+      if (p[0] == 'o' && p[1] == 's') {
+        write(1, blue, strlen(blue));
+        write(1, "os", 2);
+        write(1, reset, strlen(reset));
+        p += 2;
+      } else {
+        write(1, p, 1);
+        p++;
+      }
+    }
+    if(ecmd->argv[i+1])
+      write(1, " ", 1);
+    }
+  write(1, "\n", 1);
+  exit(0);
+  }
+
+  // Normal execution
+  exec(ecmd->argv[0], ecmd->argv);
+  fprintf(2, "exec %s failed\n", ecmd->argv[0]);
+  break;
 
   case REDIR:
     rcmd = (struct redircmd*)cmd;

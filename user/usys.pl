@@ -38,3 +38,4 @@ entry("sleep");
 entry("uptime");
 entry("trigger");
 entry("thread");
+entry("jointhread");

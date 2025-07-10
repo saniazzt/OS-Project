@@ -109,3 +109,10 @@ sys_thread(void) {
   struct thread *t = allocthread(start_thread, stack_address, arg);
   return t ? t->id : 0;
 }
+
+uint64
+sys_jointhread(void) {
+int id;
+argint(0, &id);
+return jointhread(id);
+}

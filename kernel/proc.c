@@ -44,17 +44,16 @@ proc_mapstacks(pagetable_t kpgtbl)
 }
 
 // initialize the proc table.
-void
-procinit(void)
+void procinit(void)
 {
   struct proc *p;
-  
   initlock(&pid_lock, "nextpid");
   initlock(&wait_lock, "wait_lock");
   for(p = proc; p < &proc[NPROC]; p++) {
-      initlock(&p->lock, "proc");
-      p->state = UNUSED;
-      p->kstack = KSTACK((int) (p - proc));
+    initlock(&p->lock, "proc");
+    p->state = UNUSED;
+    p->kstack = KSTACK((int) (p - proc));
+    p->current_thread = 0; //Initialize current_thread to indicate no active thread
   }
 }
 
@@ -169,6 +168,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->current_thread = 0; // Reset current_thread to null
+  for (int i = 0; i < NTHREAD; ++i) {
+  freethread(&p->threads[i]); // Free all threads associated with the process
+  }
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -433,6 +436,94 @@ wait(uint64 addr)
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
 }
+
+///////////// Thread management functions /////////////
+
+struct thread *allocthread(uint64 start_thread, uint64 stack_address,
+uint64 arg) {
+struct proc *p = myproc();
+if (!initthread(p))
+return 0;
+for (struct thread *t = p->threads; t < p->threads + NTHREAD; t++) {
+  if (t->state == THREAD_UNUSED) {
+  t->id = allocpid();
+  if ((t->trapframe = (struct trapframe *)kalloc()) == 0) {
+  freethread(t);
+  break;
+  }
+t->state = THREAD_RUNNABLE;
+*t->trapframe = *p->trapframe;
+t->trapframe->sp = stack_address;
+t->trapframe->a0 = arg;
+t->trapframe->ra = -1;
+t->trapframe->epc = (uint64) start_thread;
+return t;
+}
+}
+return 0;
+}
+
+void
+freethread(struct thread *t)
+{
+t->state = THREAD_UNUSED;
+if (t->trapframe)
+kfree((void*)t->trapframe);
+t->trapframe = 0;
+t->id = 0;
+t->join = 0;
+}
+
+void exitthread() {
+struct proc *p = myproc();
+uint id = p->current_thread->id;
+for (struct thread *t = p->threads; t < p->threads + NTHREAD; t++) {
+  if (t->state == THREAD_JOINED && t->join == id) {
+  t->join = 0;
+  t->state = THREAD_RUNNABLE;
+  }
+  }
+  freethread(p->current_thread);
+  if (!thread_schd(p))
+  setkilled(p);
+}
+
+int jointhread(uint join_id) {
+  struct proc *p = myproc();
+  struct thread *t = p->current_thread;
+  if (!t)
+  return -3;
+  int found = 0;
+  uint current_id = join_id;
+  while (current_id != 0) {
+  if (current_id == t->id)
+  return -1; // deadlock
+  uint target_id = current_id;
+  current_id = 0;
+  for (int i = 0; i < NTHREAD; i++) {
+  if (p->threads[i].id == target_id) {
+  current_id = p->threads[i].join;
+  found = 1;
+  break;
+  }
+  }
+  }
+  if (!found)
+  return -2;
+  t->join = join_id;
+  t->state = THREAD_JOINED;
+  yield();
+  return 0;
+}
+
+void sleepthread(int n, uint ticks0) {
+  struct thread *t = myproc()->current_thread;
+  t->sleep_n = n;
+  t->sleep_tick0 = ticks0;
+  t->state = THREAD_SLEEPING;
+  thread_schd(myproc());
+}
+
 
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
